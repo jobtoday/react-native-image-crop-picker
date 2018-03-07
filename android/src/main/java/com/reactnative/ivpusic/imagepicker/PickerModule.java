@@ -3,7 +3,9 @@ package com.reactnative.ivpusic.imagepicker;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -19,6 +21,7 @@ import android.util.Base64;
 import android.webkit.MimeTypeMap;
 
 import com.facebook.react.bridge.ActivityEventListener;
+import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Callback;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.PromiseImpl;
@@ -30,8 +33,11 @@ import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.WritableNativeMap;
 import com.facebook.react.modules.core.PermissionAwareActivity;
 import com.facebook.react.modules.core.PermissionListener;
+import com.facebook.react.modules.core.DeviceEventManagerModule;
 import com.yalantis.ucrop.UCrop;
 import com.yalantis.ucrop.UCropActivity;
+
+import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -42,11 +48,19 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 
-class PickerModule extends ReactContextBaseJavaModule implements ActivityEventListener {
+public class PickerModule extends ReactContextBaseJavaModule implements ActivityEventListener {
+    private static final String PREFERENCES_NAME = "JOBTODAY_IMAGE_PICKER_PREFERENCES";
+    private static final String PREFERENCES_OPTIONS_KEY= "OPTIONS";
+    private static final String PREFERENCES_CAMERA_PATH_KEY= "CAMERA";
+    private static final String PREFERENCES_PTOHO_PATH_KEY= "PHOTO";
+
 
     private static final int IMAGE_PICKER_REQUEST = 61110;
     private static final int CAMERA_PICKER_REQUEST = 61111;
@@ -96,12 +110,69 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
 
     PickerModule(ReactApplicationContext reactContext) {
         super(reactContext);
+
         reactContext.addActivityEventListener(this);
+
+        resultCollector = new ResultCollector(new PromiseImpl(new Callback() {
+            @Override
+            public void invoke(Object... args) {
+                sendEvent("IMAGE_PICKER_SUCCESS", (WritableMap) args[0]);
+            }
+        }, new Callback() {
+            @Override
+            public void invoke(Object... args) {
+                sendEvent("IMAGE_PICKER_FAILED", (WritableMap) args[0]);
+            }
+        }), multiple);
+
+        String optionsJson = getPrefs(PREFERENCES_OPTIONS_KEY);
+
+        if (optionsJson != null) {
+            Map<String, Object> data = new HashMap<>();
+
+            try {
+                final JSONObject json = new JSONObject(optionsJson);
+
+                final Iterator<String> keysIterator = json.keys();
+
+                while (keysIterator.hasNext()) {
+                    final String key = keysIterator.next();
+                    final Object value = json.get(key);
+                    data.put(key, value);
+                }
+
+                setConfiguration(Arguments.makeNativeMap(data));
+            } catch (Exception e) {
+
+            }
+        }
+    }
+
+    private String getPrefs(String key) {
+        SharedPreferences prefs = getReactApplicationContext().getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
+        String value = prefs.getString(key, null);
+
+        return value;
+    }
+
+    private void setPrefs(String key, String value) {
+        SharedPreferences preferences = getReactApplicationContext().getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = preferences.edit();
+        editor.putString(key, value);
+        editor.commit();
+    }
+
+    private void sendEvent(String key, WritableMap data) {
+        data.putString("eventkey", key);
+
+        getReactApplicationContext()
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                .emit("ReactNativeEvent", data);
     }
 
     private String getTmpDir(Activity activity) {
         String tmpDir = activity.getCacheDir() + "/react-native-image-crop-picker";
-        Boolean created = new File(tmpDir).mkdir();
+        new File(tmpDir).mkdir();
 
         return tmpDir;
     }
@@ -128,6 +199,10 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
         showCropGuidelines = options.hasKey("showCropGuidelines") ? options.getBoolean("showCropGuidelines") : showCropGuidelines;
         hideBottomControls = options.hasKey("hideBottomControls") ? options.getBoolean("hideBottomControls") : hideBottomControls;
         enableRotationGesture = options.hasKey("enableRotationGesture") ? options.getBoolean("enableRotationGesture") : enableRotationGesture;
+
+        JSONObject json = new JSONObject(options.toHashMap());
+        setPrefs(PREFERENCES_OPTIONS_KEY, json.toString());
+
         this.options = options;
     }
 
@@ -143,7 +218,6 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
 
     @ReactMethod
     public void clean(final Promise promise) {
-
         final Activity activity = getCurrentActivity();
         final PickerModule module = this;
 
@@ -301,6 +375,8 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
                         imageFile);
             }
 
+            setPrefs(PREFERENCES_CAMERA_PATH_KEY, mCameraCaptureURI.toString());
+
             cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, mCameraCaptureURI);
 
             if (cameraIntent.resolveActivity(activity.getPackageManager()) == null) {
@@ -328,7 +404,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
                 String[] mimetypes = {"image/*", "video/*"};
                 galleryIntent.putExtra(Intent.EXTRA_MIME_TYPES, mimetypes);
             }
-            
+
             galleryIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
             galleryIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple);
             galleryIntent.setAction(Intent.ACTION_GET_CONTENT);
@@ -499,6 +575,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
             path = RealPathUtil.getRealPathFromURI(activity, uri);
         } else {
             if (isCamera) {
+                mCurrentPhotoPath = getPrefs(PREFERENCES_PTOHO_PATH_KEY);
                 Uri imageUri = Uri.parse(mCurrentPhotoPath);
                 path = imageUri.getPath();
             } else {
@@ -655,6 +732,8 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
         if (resultCode == Activity.RESULT_CANCELED) {
             resultCollector.notifyProblem(E_PICKER_CANCELLED_KEY, E_PICKER_CANCELLED_MSG);
         } else if (resultCode == Activity.RESULT_OK) {
+            mCameraCaptureURI = Uri.parse(getPrefs(PREFERENCES_CAMERA_PATH_KEY));
+
             Uri uri = mCameraCaptureURI;
 
             if (uri == null) {
@@ -732,6 +811,8 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
 
         // Save a file: path for use with ACTION_VIEW intents
         mCurrentPhotoPath = "file:" + image.getAbsolutePath();
+
+        setPrefs(PREFERENCES_PTOHO_PATH_KEY, mCurrentPhotoPath);
 
         return image;
 
