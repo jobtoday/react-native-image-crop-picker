@@ -108,6 +108,7 @@ ImagePicker.clean().then(() => {
 | freeStyleCropEnabled (android only)      |        bool (default false)        | Enables user to apply custom rectangle area for cropping |
 | cropperToolbarTitle                     |        string (default `Edit Photo`)     | When cropping image, determines the title of Toolbar. |
 | cropperCircleOverlay                    |           bool (default false)           | Enable or disable circular cropping mask. |
+| disableCropperColorSetters (android only)|           bool (default false)           | When cropping image, disables the color setters for cropping library. |
 | minFiles (ios only)                     |            number (default 1)            | Min number of files to select when using `multiple` option |
 | maxFiles (ios only)                     |            number (default 5)            | Max number of files to select when using `multiple` option |
 | waitAnimationEnd (ios only)             |           bool (default true)            | Promise will resolve/reject once ViewController `completion` block is called |
@@ -123,6 +124,8 @@ ImagePicker.clean().then(() => {
 | showCropGuidelines (android only)       |           bool (default true)            | Whether to show the 3x3 grid on top of the image during cropping |
 | hideBottomControls (android only)       |           bool (default false)           | Whether to display bottom controls       |
 | enableRotationGesture (android only)    |           bool (default false)           | Whether to enable rotating the image by hand gesture |
+| cropperChooseText (ios only)            |           string (default choose)        | Choose button text |
+| cropperCancelText (ios only)            |           string (default Cancel)        | Cancel button text |
 
 #### Smart Album Types (ios)
 
@@ -243,7 +246,7 @@ In Xcode open Info.plist and add string key `NSPhotoLibraryUsageDescription` wit
 
 ### Android
 
-- Make sure you are using Gradle `2.2.x` (android/build.gradle)
+- Make sure you are using Gradle >= `2.2.x` (android/build.gradle)
 
 ```gradle
 buildscript {
@@ -265,7 +268,10 @@ allprojects {
       jcenter()
       maven { url "$rootDir/../node_modules/react-native/android" }
 
-      // jitpack repo is necessary to fetch ucrop dependency
+      // ADD THIS
+      maven { url 'https://maven.google.com' }
+
+      // ADD THIS
       maven { url "https://jitpack.io" }
     }
 }
@@ -281,6 +287,23 @@ android {
         ...
         vectorDrawables.useSupportLibrary = true
         ...
+    }
+    ...
+}
+```
+
+- Use Android SDK >= 26 (android/app/build.gradle)
+
+```gradle
+android {
+    compileSdkVersion 27
+    buildToolsVersion "27.0.3"
+    ...
+    
+    defaultConfig {
+      ...
+      targetSdkVersion 27
+      ...
     }
     ...
 }

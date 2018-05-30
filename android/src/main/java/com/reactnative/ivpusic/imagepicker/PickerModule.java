@@ -19,6 +19,7 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.FileProvider;
 import android.util.Base64;
 import android.webkit.MimeTypeMap;
+import android.content.ContentResolver;
 
 import com.facebook.react.bridge.ActivityEventListener;
 import com.facebook.react.bridge.Arguments;
@@ -88,8 +89,8 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
     private boolean showCropGuidelines = true;
     private boolean hideBottomControls = false;
     private boolean enableRotationGesture = false;
+    private boolean disableCropperColorSetters = false;
     private ReadableMap options;
-
 
     //Grey 800
     private final String DEFAULT_TINT = "#424242";
@@ -105,11 +106,14 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
 
     private Uri mCameraCaptureURI;
     private String mCurrentPhotoPath;
-    private ResultCollector resultCollector;
+    private ResultCollector resultCollector = new ResultCollector();
     private Compression compression = new Compression();
+    private ReactApplicationContext reactContext;
 
     PickerModule(ReactApplicationContext reactContext) {
         super(reactContext);
+
+        this.reactContext = reactContext;
 
         reactContext.addActivityEventListener(this);
 
@@ -183,6 +187,8 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
     }
 
     private void setConfiguration(final ReadableMap options) {
+        this.options = options;
+
         mediaType = options.hasKey("mediaType") ? options.getString("mediaType") : mediaType;
         multiple = options.hasKey("multiple") && options.getBoolean("multiple");
         includeBase64 = options.hasKey("includeBase64") && options.getBoolean("includeBase64");
@@ -203,7 +209,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         JSONObject json = new JSONObject(options.toHashMap());
         setPrefs(PREFERENCES_OPTIONS_KEY, json.toString());
 
-        this.options = options;
+        disableCropperColorSetters = options.hasKey("disableCropperColorSetters") ? options.getBoolean("disableCropperColorSetters") : disableCropperColorSetters;
     }
 
     private void deleteRecursive(File fileOrDirectory) {
@@ -226,9 +232,9 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
             return;
         }
 
-        permissionsCheck(activity, promise, Arrays.asList(Manifest.permission.WRITE_EXTERNAL_STORAGE), new Callable<Void>() {
+        permissionsCheck(activity, promise, Collections.singletonList(Manifest.permission.WRITE_EXTERNAL_STORAGE), new Callable<Void>() {
             @Override
-            public Void call() throws Exception {
+            public Void call() {
                 try {
                     File file = new File(module.getTmpDir(activity));
                     if (!file.exists()) throw new Exception("File does not exist");
@@ -260,7 +266,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
             return;
         }
 
-        permissionsCheck(activity, promise, Arrays.asList(Manifest.permission.WRITE_EXTERNAL_STORAGE), new Callable<Void>() {
+        permissionsCheck(activity, promise, Collections.singletonList(Manifest.permission.WRITE_EXTERNAL_STORAGE), new Callable<Void>() {
             @Override
             public Void call() throws Exception {
                 try {
@@ -348,11 +354,11 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         }
 
         setConfiguration(options);
-        resultCollector = new ResultCollector(promise, multiple);
+        resultCollector.setup(promise, multiple);
 
         permissionsCheck(activity, promise, Arrays.asList(Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE), new Callable<Void>() {
             @Override
-            public Void call() throws Exception {
+            public Void call() {
                 initiateCamera(activity);
                 return null;
             }
@@ -362,9 +368,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
     private void initiateCamera(Activity activity) {
 
         try {
-            int requestCode = CAMERA_PICKER_REQUEST;
             Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-
             File imageFile = createImageFile();
 
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
@@ -384,7 +388,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
                 return;
             }
 
-            activity.startActivityForResult(cameraIntent, requestCode);
+            activity.startActivityForResult(cameraIntent, CAMERA_PICKER_REQUEST);
         } catch (Exception e) {
             resultCollector.notifyProblem(E_FAILED_TO_OPEN_CAMERA, e);
         }
@@ -393,7 +397,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
 
     private void initiatePicker(final Activity activity) {
         try {
-            final Intent galleryIntent = new Intent(Intent.ACTION_PICK);
+            final Intent galleryIntent = new Intent(Intent.ACTION_GET_CONTENT);
 
             if (cropping || mediaType.equals("photo")) {
                 galleryIntent.setType("image/*");
@@ -407,8 +411,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
 
             galleryIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
             galleryIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple);
-            galleryIntent.setAction(Intent.ACTION_GET_CONTENT);
-            galleryIntent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+            galleryIntent.addCategory(Intent.CATEGORY_OPENABLE);
 
             final Intent chooserIntent = Intent.createChooser(galleryIntent, "Pick an image");
             activity.startActivityForResult(chooserIntent, IMAGE_PICKER_REQUEST);
@@ -427,11 +430,11 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         }
 
         setConfiguration(options);
-        resultCollector = new ResultCollector(promise, multiple);
+        resultCollector.setup(promise, multiple);
 
         permissionsCheck(activity, promise, Collections.singletonList(Manifest.permission.WRITE_EXTERNAL_STORAGE), new Callable<Void>() {
             @Override
-            public Void call() throws Exception {
+            public Void call() {
                 initiatePicker(activity);
                 return null;
             }
@@ -448,7 +451,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         }
 
         setConfiguration(options);
-        resultCollector = new ResultCollector(promise, false);
+        resultCollector.setup(promise, false);
 
         Uri uri = Uri.parse(options.getString("path"));
         startCropping(activity, uri);
@@ -481,14 +484,20 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         return Base64.encodeToString(bytes, Base64.NO_WRAP);
     }
 
-    private static String getMimeType(String url) {
-        String type = null;
-        String extension = MimeTypeMap.getFileExtensionFromUrl(url);
-        if (extension != null) {
-            type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
+    private String getMimeType(String url) {
+        String mimeType = null;
+        Uri uri = Uri.fromFile(new File(url));
+        if (uri.getScheme().equals(ContentResolver.SCHEME_CONTENT)) {
+            ContentResolver cr = this.reactContext.getContentResolver();
+            mimeType = cr.getType(uri);
+        } else {
+            String fileExtension = MimeTypeMap.getFileExtensionFromUrl(uri
+                    .toString());
+            if (fileExtension != null) {
+                mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(fileExtension.toLowerCase());
+            }
         }
-
-        return type;
+        return mimeType;
     }
 
     private WritableMap getSelection(Activity activity, Uri uri, boolean isCamera) throws Exception {
@@ -568,7 +577,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         }).run();
     }
 
-    private String resolveRealPath(Activity activity, Uri uri, boolean isCamera) {
+    private String resolveRealPath(Activity activity, Uri uri, boolean isCamera) throws IOException {
         String path;
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
@@ -676,7 +685,9 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
                     UCropActivity.ALL  // When 'aspect ratio'-tab active
             );
         }
-        configureCropperColors(options);
+        if (!disableCropperColorSetters) {
+            configureCropperColors(options);
+        }
 
         UCrop.of(uri, Uri.fromFile(new File(this.getTmpDir(activity), UUID.randomUUID().toString() + ".jpg")))
                 .withMaxResultSize(width, height)
