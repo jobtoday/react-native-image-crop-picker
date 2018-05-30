@@ -117,7 +117,8 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
 
         reactContext.addActivityEventListener(this);
 
-        resultCollector = new ResultCollector(new PromiseImpl(new Callback() {
+        resultCollector = new ResultCollector();
+        resultCollector.setup(new PromiseImpl(new Callback() {
             @Override
             public void invoke(Object... args) {
                 sendEvent("IMAGE_PICKER_SUCCESS", (WritableMap) args[0]);
