@@ -30,13 +30,11 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
-import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.WritableNativeMap;
 import com.facebook.react.modules.core.PermissionAwareActivity;
 import com.facebook.react.modules.core.PermissionListener;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
-import com.facebook.react.uimanager.annotations.ReactProp;
 import com.yalantis.ucrop.UCrop;
 import com.yalantis.ucrop.UCropActivity;
 
@@ -112,47 +110,38 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
     private Compression compression = new Compression();
     private ReactApplicationContext reactContext;
 
-    private Callback imagePickedCallback;
+    private Promise updatesListener;
     private WritableMap pendingValue;
 
+    @SuppressWarnings("unused")
     @ReactMethod
-    public void addOnImagePicked(Callback callback) {
-        this.imagePickedCallback = callback;
+    public void listenToUpdates(final Promise promise) {
+        this.updatesListener = promise;
 
-        if (callback != null && pendingValue != null) {
-            callback.invoke(pendingValue);
-            pendingValue = null;
+        if (pendingValue != null) {
+            invokeSuccess(pendingValue);
         }
     }
 
-    public static WritableMap cloneMap(WritableMap input) {
-        Map<String, Object> info = input.toHashMap();
-        WritableMap map = Arguments.makeNativeMap(info);
-
-        for (Map.Entry<String, Object> p : info.entrySet()) {
-            String key = p.getKey();
-            Object value = p.getValue();
-
-            if (value instanceof String) {
-                map.putString(key, (String)value);
-            } else if (value instanceof Integer) {
-                map.putInt(key, (int)value);
-            } else if (value instanceof Boolean) {
-                map.putBoolean(key, (boolean)value);
-            } else if (value instanceof Double) {
-                map.putDouble(key, (double)value);
-            } else if (value instanceof WritableArray) {
-                map.putArray(key, (WritableArray)value);
-            } else if (value instanceof WritableMap) {
-                map.putMap(key, (WritableMap)value);
-            } else {
-                map.putString(key, value.toString());
-            }
+    private void invokeSuccess(final WritableMap data) {
+        if (data == null) {
+            return;
         }
 
-        return map;
+        pendingValue = null;
+
+        if (updatesListener != null) {
+            updatesListener.resolve(data);
+        } else {
+            pendingValue = data;
+        }
     }
 
+    private void invokeFailure(String code, String message) {
+        if (updatesListener != null) {
+            updatesListener.reject(code, message);
+        }
+    }
 
     PickerModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -165,22 +154,20 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         resultCollector.setup(new PromiseImpl(new Callback() {
             @Override
             public void invoke(Object... args) {
-                WritableMap data = (WritableMap) args[0];
-                sendEvent("IMAGE_PICKER_SUCCESS", cloneMap(data));
-
-                if (imagePickedCallback != null) {
-                    imagePickedCallback.invoke(cloneMap(data));
-                } else {
-                    pendingValue = cloneMap(data);
-                }
+                invokeSuccess((WritableMap) args[0]);
             }
         }, new Callback() {
             @Override
             public void invoke(Object... args) {
-                sendEvent("IMAGE_PICKER_FAILED", (WritableMap) args[0]);
+                WritableMap map = (WritableMap) args[0];
+                invokeFailure(map.getString("code"), map.getString("message"));
             }
         }), multiple);
 
+        restoreConfigutaion();
+    }
+
+    private void restoreConfigutaion() {
         String optionsJson = getPrefs(PREFERENCES_OPTIONS_KEY);
 
         if (optionsJson != null) {
