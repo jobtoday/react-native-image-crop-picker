@@ -1,5 +1,3 @@
-apply plugin: "com.android.application"
-
 import com.android.build.OutputFile
 
 /**
@@ -64,7 +62,7 @@ import com.android.build.OutputFile
  *   extraPackagerArgs: []
  * ]
  */
-
+apply plugin: "com.android.application"
 apply from: "../../node_modules/react-native/react.gradle"
 
 /**
@@ -84,7 +82,7 @@ def enableProguardInReleaseBuilds = false
 
 android {
     compileSdkVersion 27
-    buildToolsVersion "27.0.3"
+    buildToolsVersion '28.0.3'
 
     defaultConfig {
         applicationId "com.example"
