@@ -3,6 +3,7 @@ package com.reactnative.ivpusic.imagepicker;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -19,11 +20,11 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.FileProvider;
 import android.util.Base64;
 import android.webkit.MimeTypeMap;
-import android.content.ContentResolver;
 
 import com.facebook.react.bridge.ActivityEventListener;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Callback;
+import com.facebook.react.bridge.LifecycleEventListener;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.PromiseImpl;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -32,9 +33,9 @@ import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.WritableNativeMap;
+import com.facebook.react.modules.core.DeviceEventManagerModule;
 import com.facebook.react.modules.core.PermissionAwareActivity;
 import com.facebook.react.modules.core.PermissionListener;
-import com.facebook.react.modules.core.DeviceEventManagerModule;
 import com.yalantis.ucrop.UCrop;
 import com.yalantis.ucrop.UCropActivity;
 
@@ -50,13 +51,15 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 
-public class PickerModule extends ReactContextBaseJavaModule implements ActivityEventListener {
+public class PickerModule extends ReactContextBaseJavaModule implements ActivityEventListener, LifecycleEventListener {
     private static final String PREFERENCES_NAME = "JOBTODAY_IMAGE_PICKER_PREFERENCES";
     private static final String PREFERENCES_OPTIONS_KEY= "OPTIONS";
     private static final String PREFERENCES_CAMERA_PATH_KEY= "CAMERA";
@@ -106,50 +109,65 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
 
     private Uri mCameraCaptureURI;
     private String mCurrentPhotoPath;
-    private ResultCollector resultCollector = new ResultCollector();
+    private ResultCollector resultCollector;
     private Compression compression = new Compression();
     private ReactApplicationContext reactContext;
 
-    private Promise updatesListener;
-    private WritableMap pendingValue;
-
-    @SuppressWarnings("unused")
-    @ReactMethod
-    public void listenToUpdates(final Promise promise) {
-        this.updatesListener = promise;
-
-        if (pendingValue != null) {
-            invokeSuccess(pendingValue);
-        }
-    }
-
-    private void invokeSuccess(final WritableMap data) {
-        if (data == null) {
-            return;
-        }
-
-        pendingValue = null;
-
-        if (updatesListener != null) {
-            updatesListener.resolve(data);
-        } else {
-            pendingValue = data;
-        }
-    }
-
-    private void invokeFailure(String code, String message) {
-        if (updatesListener != null) {
-            updatesListener.reject(code, message);
-        }
-    }
+    private Set<Promise> updatesListeners = new HashSet<>();
+    private Promise lastRegisteredPromise = null;
+    private Boolean wasDestroyed = false;
+    private WritableMap storedValue;
+    private long lastValueUpdate = 0;
 
     PickerModule(ReactApplicationContext reactContext) {
         super(reactContext);
 
         this.reactContext = reactContext;
+        this.reactContext.addActivityEventListener(this);
+        this.reactContext.addLifecycleEventListener(this);
 
-        reactContext.addActivityEventListener(this);
+        registerPromise();
+        restoreConfigutaion();
+    }
 
+    @Override
+    public void onHostResume() {
+        updatesListeners.clear();
+
+        if (!wasDestroyed && lastRegisteredPromise != null) {
+            updatesListeners.add(lastRegisteredPromise);
+        }
+    }
+
+    @Override
+    public void onHostPause() {
+        updatesListeners.clear();
+    }
+
+    @Override
+    public void onHostDestroy() {
+        wasDestroyed = true;
+
+        storedValue = null;
+        lastRegisteredPromise = null;
+
+        updatesListeners.clear();
+    }
+
+    @SuppressWarnings("unused")
+    @ReactMethod
+    public void listenToUpdates(final Promise promise) {
+        updatesListeners.add(promise);
+        lastRegisteredPromise = promise;
+
+        if (storedValue != null && (System.currentTimeMillis() - lastValueUpdate) < 5000) {
+            invokeSuccess(storedValue);
+        } else {
+            storedValue = null;
+        }
+    }
+
+    private void registerPromise() {
         resultCollector = new ResultCollector();
         resultCollector.setup(new PromiseImpl(new Callback() {
             @Override
@@ -163,8 +181,38 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
                 invokeFailure(map.getString("code"), map.getString("message"));
             }
         }), multiple);
+    }
 
-        restoreConfigutaion();
+    private WritableMap copyMap(WritableMap map) {
+        WritableMap copy = Arguments.createMap();
+        copy.merge(map);
+        return copy;
+    }
+
+
+    private void invokeSuccess(final WritableMap data) {
+        storedValue = data;
+        lastValueUpdate = System.currentTimeMillis();
+
+        if (data == null) {
+            return;
+        }
+
+        if (updatesListeners.size() > 0) {
+            for (Promise listener : updatesListeners) {
+                listener.resolve(copyMap(data));
+            }
+            updatesListeners.clear();
+        }
+    }
+
+    private void invokeFailure(String code, String message) {
+        if (updatesListeners.size() > 0) {
+            for (Promise listener : updatesListeners) {
+                listener.reject(code, message);
+            }
+            updatesListeners.clear();
+        }
     }
 
     private void restoreConfigutaion() {
@@ -392,7 +440,8 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         }
 
         setConfiguration(options);
-        resultCollector.setup(promise, multiple);
+        listenToUpdates(promise);
+        registerPromise();
 
         permissionsCheck(activity, promise, Arrays.asList(Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE), new Callable<Void>() {
             @Override
@@ -468,7 +517,8 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         }
 
         setConfiguration(options);
-        resultCollector.setup(promise, multiple);
+        listenToUpdates(promise);
+        registerPromise();
 
         permissionsCheck(activity, promise, Collections.singletonList(Manifest.permission.WRITE_EXTERNAL_STORAGE), new Callable<Void>() {
             @Override
@@ -489,7 +539,8 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         }
 
         setConfiguration(options);
-        resultCollector.setup(promise, false);
+        listenToUpdates(promise);
+        registerPromise();
 
         Uri uri = Uri.parse(options.getString("path"));
         startCropping(activity, uri);
@@ -857,7 +908,6 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         }
 
         File image = File.createTempFile(imageFileName, ".jpg", path);
-
         // Save a file: path for use with ACTION_VIEW intents
         mCurrentPhotoPath = "file:" + image.getAbsolutePath();
 
