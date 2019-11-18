@@ -157,7 +157,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
     @SuppressWarnings("unused")
     @ReactMethod
     public void listenToUpdates(final Promise promise) {
-        updatesListeners.add(promise);
+//        updatesListeners.add(promise);
         lastRegisteredPromise = promise;
 
         if (storedValue != null && (System.currentTimeMillis() - lastValueUpdate) < 5000) {
