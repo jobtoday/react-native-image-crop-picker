@@ -16,8 +16,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
-import android.support.v4.app.ActivityCompat;
-import android.support.v4.content.FileProvider;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.FileProvider;
 import android.util.Base64;
 import android.webkit.MimeTypeMap;
 
@@ -113,7 +113,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
     private Compression compression = new Compression();
     private ReactApplicationContext reactContext;
 
-    private Set<Promise> updatesListeners = new HashSet<>();
+    //    private Set<Promise> updatesListeners = new HashSet<>();
     private Promise lastRegisteredPromise = null;
     private Boolean wasDestroyed = false;
     private WritableMap storedValue;
@@ -132,16 +132,16 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
 
     @Override
     public void onHostResume() {
-        updatesListeners.clear();
-
-        if (!wasDestroyed && lastRegisteredPromise != null) {
-            updatesListeners.add(lastRegisteredPromise);
-        }
+//        updatesListeners.clear();
+//
+//        if (lastRegisteredPromise != null) {
+//            updatesListeners.add(lastRegisteredPromise);
+//        }
     }
 
     @Override
     public void onHostPause() {
-        updatesListeners.clear();
+//        updatesListeners.clear();
     }
 
     @Override
@@ -151,7 +151,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         storedValue = null;
         lastRegisteredPromise = null;
 
-        updatesListeners.clear();
+//        updatesListeners.clear();
     }
 
     @SuppressWarnings("unused")
@@ -198,20 +198,30 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
             return;
         }
 
-        if (updatesListeners.size() > 0) {
-            for (Promise listener : updatesListeners) {
-                listener.resolve(copyMap(data));
-            }
-            updatesListeners.clear();
+//        if (updatesListeners.size() > 0) {
+//            for (Promise listener : updatesListeners) {
+//                listener.resolve(copyMap(data));
+//            }
+//            updatesListeners.clear();
+//        }
+
+        if (lastRegisteredPromise != null) {
+            lastRegisteredPromise.resolve(copyMap(data));
+            lastRegisteredPromise = null;
         }
     }
 
     private void invokeFailure(String code, String message) {
-        if (updatesListeners.size() > 0) {
-            for (Promise listener : updatesListeners) {
-                listener.reject(code, message);
-            }
-            updatesListeners.clear();
+//        if (updatesListeners.size() > 0) {
+//            for (Promise listener : updatesListeners) {
+//                listener.reject(code, message);
+//            }
+//            updatesListeners.clear();
+//        }
+
+        if (lastRegisteredPromise != null) {
+            lastRegisteredPromise.reject(code, message);
+            lastRegisteredPromise = null;
         }
     }
 
