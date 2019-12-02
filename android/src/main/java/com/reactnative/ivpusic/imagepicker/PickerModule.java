@@ -203,11 +203,13 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
 //                listener.resolve(copyMap(data));
 //            }
 //            updatesListeners.clear();
+//            storedValue = null;
 //        }
 
         if (lastRegisteredPromise != null) {
             lastRegisteredPromise.resolve(copyMap(data));
             lastRegisteredPromise = null;
+            storedValue = null;
         }
     }
 
@@ -217,11 +219,13 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
 //                listener.reject(code, message);
 //            }
 //            updatesListeners.clear();
+//            storedValue = null;
 //        }
 
         if (lastRegisteredPromise != null) {
             lastRegisteredPromise.reject(code, message);
             lastRegisteredPromise = null;
+            storedValue = null;
         }
     }
 
