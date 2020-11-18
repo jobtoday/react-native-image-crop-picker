@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ContentResolver;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -731,8 +732,8 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
             path = RealPathUtil.getRealPathFromURI(activity, uri);
         } else {
             if (isCamera) {
-                mCurrentPhotoPath = getPrefs(PREFERENCES_PHOTO_PATH_KEY);
-                Uri imageUri = Uri.parse(mCurrentPhotoPath);
+                mCurrentMediaPath = getPrefs(PREFERENCES_PHOTO_PATH_KEY);
+                Uri imageUri = Uri.parse(mCurrentMediaPath);
                 path = imageUri.getPath();
             } else {
                 path = RealPathUtil.getRealPathFromURI(activity, uri);
@@ -991,8 +992,8 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         File image = File.createTempFile(imageFileName, ".jpg", path);
         // Save a file: path for use with ACTION_VIEW intents
         mCurrentMediaPath = "file:" + image.getAbsolutePath();
-
-        setPrefs(PREFERENCES_PHOTO_PATH_KEY, mCurrentPhotoPath);
+        
+        setPrefs(PREFERENCES_PHOTO_PATH_KEY, mCurrentMediaPath);
 
         return image;
 
