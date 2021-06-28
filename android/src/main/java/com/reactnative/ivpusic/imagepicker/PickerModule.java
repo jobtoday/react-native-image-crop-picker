@@ -32,7 +32,9 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.bridge.WritableNativeArray;
 import com.facebook.react.bridge.WritableNativeMap;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
 import com.facebook.react.modules.core.PermissionAwareActivity;
@@ -120,7 +122,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
     //    private Set<Promise> updatesListeners = new HashSet<>();
     private Promise lastRegisteredPromise = null;
     private Boolean wasDestroyed = false;
-    private WritableMap storedValue;
+    private Object storedValue;
     private long lastValueUpdate = 0;
 
     PickerModule(ReactApplicationContext reactContext) {
@@ -176,7 +178,11 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         resultCollector.setup(new PromiseImpl(new Callback() {
             @Override
             public void invoke(Object... args) {
-                invokeSuccess((WritableMap) args[0]);
+                if (multiple) {
+                    invokeSuccess((WritableNativeArray) args[0]);
+                } else {
+                    invokeSuccess((WritableMap) args[0]);
+                }
             }
         }, new Callback() {
             @Override
@@ -194,7 +200,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
     }
 
 
-    private void invokeSuccess(final WritableMap data) {
+    private void invokeSuccess(final Object data) {
         storedValue = data;
         lastValueUpdate = System.currentTimeMillis();
 
@@ -211,7 +217,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
 //        }
 
         if (lastRegisteredPromise != null) {
-            lastRegisteredPromise.resolve(copyMap(data));
+            lastRegisteredPromise.resolve(data);
             lastRegisteredPromise = null;
             storedValue = null;
         }
@@ -313,7 +319,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         disableCropperColorSetters = options.hasKey("disableCropperColorSetters") && options.getBoolean("disableCropperColorSetters");
         useFrontCamera = options.hasKey("useFrontCamera") && options.getBoolean("useFrontCamera");
         this.options = options;
-        
+
         JSONObject json = new JSONObject(options.toHashMap());
         setPrefs(PREFERENCES_OPTIONS_KEY, json.toString());
     }
@@ -1006,7 +1012,7 @@ public class PickerModule extends ReactContextBaseJavaModule implements Activity
         File image = File.createTempFile(imageFileName, ".jpg", path);
         // Save a file: path for use with ACTION_VIEW intents
         mCurrentMediaPath = "file:" + image.getAbsolutePath();
-        
+
         setPrefs(PREFERENCES_PHOTO_PATH_KEY, mCurrentMediaPath);
 
         return image;
