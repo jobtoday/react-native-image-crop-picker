@@ -4,7 +4,9 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ContentResolver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -21,19 +23,26 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.FileProvider;
 
 import com.facebook.react.bridge.ActivityEventListener;
+import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Callback;
+import com.facebook.react.bridge.LifecycleEventListener;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.PromiseImpl;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.bridge.WritableNativeArray;
 import com.facebook.react.bridge.WritableNativeMap;
+import com.facebook.react.modules.core.DeviceEventManagerModule;
 import com.facebook.react.modules.core.PermissionAwareActivity;
 import com.facebook.react.modules.core.PermissionListener;
 import com.yalantis.ucrop.UCrop;
 import com.yalantis.ucrop.UCropActivity;
+
+import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -44,11 +53,21 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 
-class PickerModule extends ReactContextBaseJavaModule implements ActivityEventListener {
+public class PickerModule extends ReactContextBaseJavaModule implements ActivityEventListener, LifecycleEventListener {
+    private static final String PREFERENCES_NAME = "JOBTODAY_IMAGE_PICKER_PREFERENCES";
+    private static final String PREFERENCES_OPTIONS_KEY= "OPTIONS";
+    private static final String PREFERENCES_CAMERA_PATH_KEY= "CAMERA";
+    private static final String PREFERENCES_PHOTO_PATH_KEY= "PHOTO";
+
 
     private static final int IMAGE_PICKER_REQUEST = 61110;
     private static final int CAMERA_PICKER_REQUEST = 61111;
@@ -100,10 +119,170 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
     private Compression compression = new Compression();
     private ReactApplicationContext reactContext;
 
+    //    private Set<Promise> updatesListeners = new HashSet<>();
+    private Promise lastRegisteredPromise = null;
+    private Boolean wasDestroyed = false;
+    private Object storedValue;
+    private long lastValueUpdate = 0;
+
     PickerModule(ReactApplicationContext reactContext) {
         super(reactContext);
-        reactContext.addActivityEventListener(this);
+
         this.reactContext = reactContext;
+        this.reactContext.addActivityEventListener(this);
+        this.reactContext.addLifecycleEventListener(this);
+
+        registerPromise();
+        restoreConfigutaion();
+    }
+
+    @Override
+    public void onHostResume() {
+//        updatesListeners.clear();
+//
+//        if (lastRegisteredPromise != null) {
+//            updatesListeners.add(lastRegisteredPromise);
+//        }
+    }
+
+    @Override
+    public void onHostPause() {
+//        updatesListeners.clear();
+    }
+
+    @Override
+    public void onHostDestroy() {
+        wasDestroyed = true;
+
+        storedValue = null;
+        lastRegisteredPromise = null;
+
+//        updatesListeners.clear();
+    }
+
+    @SuppressWarnings("unused")
+    @ReactMethod
+    public void listenToUpdates(final Promise promise) {
+//        updatesListeners.add(promise);
+        lastRegisteredPromise = promise;
+
+        if (storedValue != null && (System.currentTimeMillis() - lastValueUpdate) < 5000) {
+            invokeSuccess(storedValue);
+        } else {
+            storedValue = null;
+        }
+    }
+
+    private void registerPromise() {
+        resultCollector = new ResultCollector();
+        resultCollector.setup(new PromiseImpl(new Callback() {
+            @Override
+            public void invoke(Object... args) {
+                if (multiple) {
+                    invokeSuccess((WritableNativeArray) args[0]);
+                } else {
+                    invokeSuccess((WritableMap) args[0]);
+                }
+            }
+        }, new Callback() {
+            @Override
+            public void invoke(Object... args) {
+                WritableMap map = (WritableMap) args[0];
+                invokeFailure(map.getString("code"), map.getString("message"));
+            }
+        }), multiple);
+    }
+
+    private WritableMap copyMap(WritableMap map) {
+        WritableMap copy = Arguments.createMap();
+        copy.merge(map);
+        return copy;
+    }
+
+
+    private void invokeSuccess(final Object data) {
+        storedValue = data;
+        lastValueUpdate = System.currentTimeMillis();
+
+        if (data == null) {
+            return;
+        }
+
+//        if (updatesListeners.size() > 0) {
+//            for (Promise listener : updatesListeners) {
+//                listener.resolve(copyMap(data));
+//            }
+//            updatesListeners.clear();
+//            storedValue = null;
+//        }
+
+        if (lastRegisteredPromise != null) {
+            lastRegisteredPromise.resolve(data);
+            lastRegisteredPromise = null;
+            storedValue = null;
+        }
+    }
+
+    private void invokeFailure(String code, String message) {
+//        if (updatesListeners.size() > 0) {
+//            for (Promise listener : updatesListeners) {
+//                listener.reject(code, message);
+//            }
+//            updatesListeners.clear();
+//            storedValue = null;
+//        }
+
+        if (lastRegisteredPromise != null) {
+            lastRegisteredPromise.reject(code, message);
+            lastRegisteredPromise = null;
+            storedValue = null;
+        }
+    }
+
+    private void restoreConfigutaion() {
+        String optionsJson = getPrefs(PREFERENCES_OPTIONS_KEY);
+
+        if (optionsJson != null) {
+            Map<String, Object> data = new HashMap<>();
+
+            try {
+                final JSONObject json = new JSONObject(optionsJson);
+
+                final Iterator<String> keysIterator = json.keys();
+
+                while (keysIterator.hasNext()) {
+                    final String key = keysIterator.next();
+                    final Object value = json.get(key);
+                    data.put(key, value);
+                }
+
+                setConfiguration(Arguments.makeNativeMap(data));
+            } catch (Exception e) {
+
+            }
+        }
+    }
+
+    private String getPrefs(String key) {
+        SharedPreferences prefs = getReactApplicationContext().getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
+        String value = prefs.getString(key, null);
+
+        return value;
+    }
+
+    private void setPrefs(String key, String value) {
+        SharedPreferences preferences = getReactApplicationContext().getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = preferences.edit();
+        editor.putString(key, value);
+        editor.commit();
+    }
+
+    private void sendEvent(String key, WritableMap data) {
+        data.putString("eventkey", key);
+
+        getReactApplicationContext()
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                .emit("ReactNativeEvent", data);
     }
 
     private String getTmpDir(Activity activity) {
@@ -140,6 +319,9 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
         disableCropperColorSetters = options.hasKey("disableCropperColorSetters") && options.getBoolean("disableCropperColorSetters");
         useFrontCamera = options.hasKey("useFrontCamera") && options.getBoolean("useFrontCamera");
         this.options = options;
+
+        JSONObject json = new JSONObject(options.toHashMap());
+        setPrefs(PREFERENCES_OPTIONS_KEY, json.toString());
     }
 
     private void deleteRecursive(File fileOrDirectory) {
@@ -154,7 +336,6 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
 
     @ReactMethod
     public void clean(final Promise promise) {
-
         final Activity activity = getCurrentActivity();
         final PickerModule module = this;
 
@@ -301,6 +482,9 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
         }
 
         setConfiguration(options);
+        listenToUpdates(promise);
+        registerPromise();
+
         resultCollector.setup(promise, false);
 
         permissionsCheck(activity, promise, Arrays.asList(Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE), new Callable<Void>() {
@@ -335,6 +519,8 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
                         activity.getApplicationContext().getPackageName() + ".provider",
                         dataFile);
             }
+
+            setPrefs(PREFERENCES_CAMERA_PATH_KEY, mCameraCaptureURI.toString());
 
             cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, mCameraCaptureURI);
 
@@ -395,7 +581,8 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
         }
 
         setConfiguration(options);
-        resultCollector.setup(promise, multiple);
+        listenToUpdates(promise);
+        registerPromise();
 
         permissionsCheck(activity, promise, Collections.singletonList(Manifest.permission.WRITE_EXTERNAL_STORAGE), new Callable<Void>() {
             @Override
@@ -416,7 +603,8 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
         }
 
         setConfiguration(options);
-        resultCollector.setup(promise, false);
+        listenToUpdates(promise);
+        registerPromise();
 
         final Uri uri = Uri.parse(options.getString("path"));
         permissionsCheck(activity, promise, Collections.singletonList(Manifest.permission.WRITE_EXTERNAL_STORAGE), new Callable<Void>() {
@@ -575,8 +763,9 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
             path = RealPathUtil.getRealPathFromURI(activity, uri);
         } else {
             if (isCamera) {
-                Uri mediaUri = Uri.parse(mCurrentMediaPath);
-                path = mediaUri.getPath();
+                mCurrentMediaPath = getPrefs(PREFERENCES_PHOTO_PATH_KEY);
+                Uri imageUri = Uri.parse(mCurrentMediaPath);
+                path = imageUri.getPath();
             } else {
                 path = RealPathUtil.getRealPathFromURI(activity, uri);
             }
@@ -741,6 +930,8 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
         if (resultCode == Activity.RESULT_CANCELED) {
             resultCollector.notifyProblem(E_PICKER_CANCELLED_KEY, E_PICKER_CANCELLED_MSG);
         } else if (resultCode == Activity.RESULT_OK) {
+            mCameraCaptureURI = Uri.parse(getPrefs(PREFERENCES_CAMERA_PATH_KEY));
+
             Uri uri = mCameraCaptureURI;
 
             if (uri == null) {
@@ -830,9 +1021,10 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
         }
 
         File image = File.createTempFile(imageFileName, ".jpg", path);
-
         // Save a file: path for use with ACTION_VIEW intents
         mCurrentMediaPath = "file:" + image.getAbsolutePath();
+
+        setPrefs(PREFERENCES_PHOTO_PATH_KEY, mCurrentMediaPath);
 
         return image;
 
